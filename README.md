@@ -272,3 +272,6 @@ The authors and contributors of PhantomFS:
 ## Acknowledgments
 
 Built on the [Windows Projected File System API](https://docs.microsoft.com/en-us/windows/win32/projfs/projected-file-system) — the same technology that powers WSL2 and OneDrive Files On-Demand.
+
+Inspired by my work as a researcher at Thinkst 💚 `https://citation.thinkst.com/talk/94782`
+
