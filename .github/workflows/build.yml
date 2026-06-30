@@ -1,0 +1,120 @@
+# .github/workflows/build.yml
+# PhantomFS — CI/CD build pipeline
+#
+# Compiles PhantomFS.exe for x64 and arm using the .NET Framework 4.x
+# compiler shipped with Windows, uploads per-arch artifacts, and optionally
+# publishes a GitHub Release.
+#
+# ── Trigger ───────────────────────────────────────────────────────────────
+#   Manual only — Actions → Build PhantomFS → Run workflow
+#   Inputs:
+#     version         e.g. v1.2.0 — included in artifact and release names
+#     create_release  tick to publish a GitHub Release after building
+# ──────────────────────────────────────────────────────────────────────────
+
+name: Build PhantomFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label (e.g. v1.0.0) — used in artifact and release names'
+        required: true
+        default: 'v1.0.0'
+      create_release:
+        description: 'Publish a GitHub Release after building'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # required for GitHub Release creation
+
+# ── Build matrix ──────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: Build — ${{ matrix.platform }}
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ x64, arm ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compile (${{ matrix.platform }})
+        shell: pwsh
+        run: |
+          $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          $out = "bin\${{ matrix.platform }}"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+
+          & $csc /platform:${{ matrix.platform }} /r:System.Xml.dll `
+            /out:"$out\PhantomFS.exe" src\PhantomFS.cs
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Compilation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Stage config
+        shell: pwsh
+        run: |
+          $config = Get-ChildItem -Path "${{ github.workspace }}\src" `
+                      -Filter "*.exe.config" -File |
+                    Select-Object -First 1 -ExpandProperty FullName
+
+          if ($config) {
+            Copy-Item $config "bin\${{ matrix.platform }}\PhantomFS.exe.config"
+            Write-Host "Staged config: $config"
+          } else {
+            Write-Warning "No .exe.config found in workspace — skipping."
+            Write-Host "Workspace contents:"
+            Get-ChildItem "${{ github.workspace }}" | Select-Object Name, Length
+          }
+
+      - name: Upload artifact — PhantomFS-${{ github.event.inputs.version }}-${{ matrix.platform }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-${{ matrix.platform }}
+          path: bin\${{ matrix.platform }}\
+          if-no-files-found: error
+
+# ── Release ───────────────────────────────────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.create_release == 'true' }}
+
+    steps:
+      - name: Download x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-x64
+          path: release/x64
+
+      - name: Download arm artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-arm
+          path: release/arm
+
+      - name: Zip release bundles
+        run: |
+          cd release
+          zip -r PhantomFS-${{ github.event.inputs.version }}-x64.zip x64/
+          zip -r PhantomFS-${{ github.event.inputs.version }}-arm.zip  arm/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: PhantomFS ${{ github.event.inputs.version }}
+          generate_release_notes: true
+          files: |
+            release/PhantomFS-${{ github.event.inputs.version }}-x64.zip
+            release/PhantomFS-${{ github.event.inputs.version }}-arm.zip
