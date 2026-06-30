@@ -17,7 +17,7 @@
 ---
 
 > **Trademark Notice:** PhantomFS™ is a trademark of Alloy Secure. All rights reserved.
-> Unauthorized use of the PhantomFS name or logo in competing products or services is prohibited.
+
 
 ---
 
@@ -166,7 +166,7 @@ Open **Event Viewer → Windows Logs → Application** and filter by source `Pha
 
 ## CI/CD — GitHub Actions
 
-PhantomFS ships a workflow at `.github/workflows/build.yml` that compiles for **x64** and **ARM64** in parallel, signs both assemblies with a strong name key, and publishes a GitHub Release on every version tag.
+PhantomFS ships a workflow at `.github/workflows/build.yml` that compiles for **x64** and **ARM64** in parallel, and publishes a GitHub Release on every version tag.
 
 ### Triggering a release
 
@@ -193,6 +193,7 @@ csc.exe /platform:x64 /r:System.Xml.dll /out:PhantomFS.exe src\PhantomFS.cs
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 ```
 
+## Optional - Build an installer
 To build the Inno Setup installer (requires [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 
 ```powershell
