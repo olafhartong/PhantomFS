@@ -16,11 +16,6 @@
 
 ---
 
-> **Trademark Notice:** PhantomFS™ is a trademark of Alloy Secure. All rights reserved.
-
-
----
-
 ## What Is PhantomFS?
 
 PhantomFS uses the **Windows Projected File System (ProjFS)** to surface a virtual directory full of convincing decoy files — financial reports, SSH keys, API credentials, HR spreadsheets, NDAs — that exist only in memory. No data is ever written to disk until an attacker (or insider threat) opens one.
@@ -45,7 +40,8 @@ Because legitimate users have no reason to open files they didn't put there, eve
 | **Configurable templates** | PDF, XLSX, DOCX, JSON, CSV, PEM, plain text — all served from XML templates in the config |
 | **Per-file cooldown** | Configurable throttle (default 15 s) prevents alert floods when a tool reads multiple chunks |
 | **Synthetic file list** | Drop-in XML list of convincing filenames with realistic byte sizes |
-| **Single executable** | `PhantomFS.exe` + `PhantomFS.exe.config` — no installer required |
+| **Single executable** | `PhantomFS.exe` + `PhantomFS.exe.config` — no installer required for basic use |
+| ** OPTIONAL - Inno Setup installer** | Registers EventLog source, enables ProjFS feature, optional scheduled task at logon |
 
 ---
 
@@ -53,20 +49,21 @@ Because legitimate users have no reason to open files they didn't put there, eve
 
 - Windows 10 version 1809 (Build 17763) or later — Windows 11 recommended
 - .NET Framework 4.8
-- **Windows Projected File System** optional feature enabled
+- **Windows Projected File System** optional feature enabled (installer handles this automatically)
 - Administrator privileges to start the virtual root
 
 ---
 
 ## Quick Start
 
-```powershell
-# 1. Enable ProjFS (one-time, requires reboot)
-Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart
+###  Simple Commands (recommended)
 
-# 2. Run PhantomFS (requires Administrator)
-.\PhantomFS.exe --virtroot C:\Users\PhantomFS --syntheticonly
-```
+1. Download `PhantomFSSetup-1.0.0.exe` from [Releases](https://github.com/AlloySecureGroup/PhantomFS/releases)
+2. Run as Administrator — enable ProjFS, `Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart`
+3. Execute `.\PhantomFS.exe --virtroot C:\PhantomFS\Virtual\Documents --syntheticonly`
+4. Browse to `C:\PhantomFS\Virtual\Documents` in Explorer — you will see the decoy files
+5. Open one — watch the Toast fire and check **Event Viewer → Windows Logs → Application**
+
 
 ---
 
@@ -176,7 +173,14 @@ csc.exe /platform:x64 /r:System.Xml.dll /out:PhantomFS.exe src\PhantomFS.cs
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 ```
 
+## Optional - Build an installer
+To build the Inno Setup installer (requires [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 
+```powershell
+iscc.exe installer\PhantomFS.iss
+```
+
+---
 
 ## Deployment Ideas
 
@@ -239,9 +243,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-> **Trademark Notice:** PhantomFS™ is a trademark of Alloy Secure. The MIT license grants rights to the
-> software source code only — it does not grant any right to use the PhantomFS name, logo, or
-> branding in a manner that implies endorsement or competes with the original product.
+
+> **Trademark Notice:** PhantomFS™ is a trademark of Alloy Secure. All rights reserved.
+
 
 ---
 
@@ -258,6 +262,10 @@ The authors and contributors of PhantomFS:
 - Are **not responsible** for any data loss, system damage, legal liability, or harm to third parties resulting from deployment of PhantomFS in any environment
 
 **Use at your own risk.** By using PhantomFS you acknowledge that you have read this disclaimer, understand it, and agree to be bound by its terms.
+
+
+> **Trademark Notice:** PhantomFS™ is a trademark of Alloy Secure. All rights reserved.
+
 
 ---
 
