@@ -29,7 +29,7 @@
 │  │  OnStartDir     │───▶│  OnPlaceholderCreated  │  │
 │  │  OnGetEntries   │    │  OnFileAccessed        │  │
 │  │  OnEndDir       │    │                        │  │
-│  │  OnPhi          │    │  ┌──────────────────┐  │  │
+│  │  OnGetPhi       │    │  ┌──────────────────┐  │  │
 │  │  OnData         │    │  │  EventLog writer  │  │  │
 │  └────────┬────────┘    │  │  Toast (PS1)      │  │  │
 │           │             │  └──────────────────┘  │  │
@@ -67,7 +67,7 @@ Windows Projected File System (ProjFS) is a kernel-mode file system filter that 
 
 **Key concepts:**
 
-- **Placeholder** — A sparse on-disk entry created the first time a file is stat'd or browsed. It stores metadata (name, size, timestamps) but no data. The callback that creates it is `GetPlaceholderInfo`.
+- **Placeholder** — A sparse on-disk entry created the first time a file is stat'd or browsed. It stores metadata (name, size, timestamps) but no data. The callback that creates it is `GetPlaceholderInfo` — abbreviated `GetPhi` in ProjFS convention, since "Phi" is shorthand for "PlaceholderInfo."
 - **Hydration** — When an application actually reads bytes from a placeholder, ProjFS calls `GetFileData`. The provider streams the content; ProjFS caches it. This is the primary alert trigger.
 - **Virtualization instance** — Identified by a GUID stored in the root reparse point. PhantomFS wipes and re-marks the root on every start to avoid stale state.
 
@@ -87,7 +87,7 @@ ProjFS kernel driver
         ├─── Directory enumeration ──▶ OnStartDir / OnGetEntries / OnEndDir
         │                               (no alert — browsing alone is not conclusive)
         │
-        ├─── File stat / metadata ───▶ OnPhi (GetPlaceholderInfo)
+        ├─── File stat / metadata ───▶ OnGetPlaceholderInfo (OnGetPhi)
         │                               AlertManager.OnPlaceholderCreated
         │                               → EventLog Warning 1002 (if alertOnOpen=true)
         │
@@ -372,16 +372,6 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 
 Open `PhantomFS.sln` → **Build → Build Solution**. The output lands in `bin\Release\net48\`.
 
-### Building the Installer
-
-Requires [Inno Setup 6](https://jrsoftware.org/isdl.php).
-
-```powershell
-iscc.exe installer\PhantomFS.iss
-```
-
-Output: `installer\Output\PhantomFSSetup-1.0.0.exe`
-
 ---
 
 ## 11. Troubleshooting
@@ -418,7 +408,7 @@ New-Item -ItemType Directory -Path C:\PhantomFS\Virtual
 New-EventLog -LogName Application -Source PhantomFS
 ```
 
-Requires elevation. The installer does this automatically.
+Requires elevation.
 
 ### Decoy files not visible in Explorer
 
