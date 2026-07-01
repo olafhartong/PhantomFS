@@ -156,7 +156,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Release assets will be named `PhantomFS-v1.0.0-x64.zip` and `PhantomFS-v1.0.0-arm.zip`.
+Release assets will be named `PhantomFS-v1.0.0-x64.zip` .
 
 ---
 
@@ -189,7 +189,7 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 - [ ] Configurable alert email via SMTP
 - [ ] Auto-block via Windows Firewall on alert
 - [ ] GUI management console
-- [ ] ARM64 support
+
 
 ---
 
