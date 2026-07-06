@@ -31,22 +31,6 @@ Because legitimate users have no reason to open files they didn't put there, eve
 
 ---
 
-## What's New in v1.1.0
-
-### Auto-cleanup of materialized files
-
-When an attacker opens a synthetic file, ProjFS writes its content to disk (hydrates the placeholder). Left indefinitely, these hydrated files accumulate and could reveal to an attacker that they triggered a response. v1.1.0 adds a background cleanup timer that deletes materialized synthetic placeholders after a configurable delay (default: 5 minutes), reverting them to virtual files. The next access re-hydrates them on demand — nothing is permanently lost.
-
-### Remote session logging
-
-When a honeypot file is accessed over an SMB share, the Windows kernel SMB driver (srv2.sys) is the triggering process — ProjFS reports it as PID 4 (the System process). v1.1.0 detects this and calls `NetSessionEnum` to identify the **domain username** and **source machine** of the connecting client. A DNS lookup resolves the machine name to an IP address (configurable). The username, hostname, and IP all appear in the Event Log entry and Toast notification.
-
-### Backwards compatibility
-
-All v1.1.0 config keys are optional. A v1.0.0 `PhantomFS.exe.config` will continue to work without modification — omitted keys fall back to the documented defaults.
-
----
-
 ## Features
 
 | Feature | Details |
