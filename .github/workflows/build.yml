@@ -202,13 +202,32 @@ jobs:
           cd release
           zip -r PhantomFS-${{ github.event.inputs.version }}-x64.zip x64/
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Create draft release and upload assets
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: PhantomFS ${{ github.event.inputs.version }}
           target_commitish: ${{ github.event.inputs.branch }}
           generate_release_notes: true
+          draft: true
           files: |
             release/PhantomFS-${{ github.event.inputs.version }}-x64.zip
             release/setup/*.exe
+
+      - name: Publish the release
+        shell: bash
+        run: |
+          # On repos with Immutable Releases enabled, GitHub blocks any
+          # update to a release once it has been published, including the
+          # single internal update this action normally performs right
+          # after uploading assets to flip draft -> published. Creating it
+          # as a draft above sidesteps that: drafts are not locked, so
+          # assets upload against a mutable object, and this is the one
+          # and only transition into published state, which GitHub allows
+          # even under Immutable Releases. Any further edits after this
+          # point would hit the same block the old single-step flow did.
+          gh release edit "${{ github.event.inputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
