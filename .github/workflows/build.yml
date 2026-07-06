@@ -1,17 +1,17 @@
 # .github/workflows/build.yml
-# PhantomFS — CI/CD build pipeline
+# PhantomFS - CI/CD build pipeline
 #
 # Compiles PhantomFS.exe for x64 using the .NET Framework 4.x
 # compiler shipped with Windows, uploads the artifact, and optionally
 # publishes a GitHub Release.
 #
-# ── Trigger ───────────────────────────────────────────────────────────────
-#   Manual only — Actions → Build PhantomFS → Run workflow
+# -- Trigger -----------------------------------------------------------------
+#   Manual only - Actions -> Build PhantomFS -> Run workflow
 #   Inputs:
 #     branch          branch to build from (default: main)
-#     version         e.g. v1.2.0 — included in artifact and release names
+#     version         e.g. v1.3.0, included in artifact and release names
 #     create_release  tick to publish a GitHub Release after building
-# ──────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 name: Build PhantomFS
 
@@ -23,7 +23,7 @@ on:
         required: true
         default: 'main'
       version:
-        description: 'Version label (e.g. v1.0.0) — used in artifact and release names'
+        description: 'Version label (e.g. v1.0.0), used in artifact and release names'
         required: true
         default: 'v1.0.0'
       create_release:
@@ -35,10 +35,10 @@ on:
 permissions:
   contents: write   # required for GitHub Release creation
 
-# ── Build ──────────────────────────────────────────────────────────────────
+# -- Build ---------------------------------------------------------------------
 jobs:
   build:
-    name: Build — x64
+    name: Build - x64
     runs-on: windows-latest
 
     steps:
@@ -47,6 +47,39 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch }}
 
+      - name: Fetch WinRT metadata (Microsoft.Windows.SDK.Contracts)
+        shell: pwsh
+        run: |
+          # Windows.UI.Notifications.winmd / Windows.Data.Xml.Dom.winmd /
+          # Windows.Foundation.winmd are not reliably present under
+          # C:\Windows\System32\WinMetadata on every Windows runner image,
+          # Server SKUs in particular often lack them, since toast/Action
+          # Center is fundamentally a client-shell feature. Rather than
+          # depend on whatever happens to be installed on the build agent,
+          # pull the single combined Windows.winmd from the
+          # Microsoft.Windows.SDK.Contracts NuGet package instead, it
+          # covers the same API surface as package content, independent of
+          # the host OS. This has no bearing on the target/deployment
+          # machine, which still only needs ProjFS and the OS's own WinRT
+          # runtime at execution time, not this package.
+          $contractsId      = "microsoft.windows.sdk.contracts"
+          $contractsVersion = "10.0.26100.4188"
+          $nupkgUrl     = "https://api.nuget.org/v3-flatcontainer/$contractsId/$contractsVersion/$contractsId.$contractsVersion.nupkg"
+          $nupkgPath    = Join-Path $env:RUNNER_TEMP "sdk.contracts.zip"
+          $extractPath  = Join-Path $env:RUNNER_TEMP "sdk.contracts"
+
+          Invoke-WebRequest -Uri $nupkgUrl -OutFile $nupkgPath
+          Expand-Archive -Path $nupkgPath -DestinationPath $extractPath -Force
+
+          $windowsWinmd = Join-Path $extractPath "ref\netstandard2.0\Windows.winmd"
+          if (-not (Test-Path $windowsWinmd)) {
+            Write-Error "Windows.winmd not found after extracting Microsoft.Windows.SDK.Contracts $contractsVersion"
+            exit 1
+          }
+
+          # Hand the resolved path to later steps.
+          echo "WINDOWS_WINMD=$windowsWinmd" >> $env:GITHUB_ENV
+
       - name: Compile (x64)
         shell: pwsh
         run: |
@@ -54,7 +87,11 @@ jobs:
           $out = "bin\x64"
           New-Item -ItemType Directory -Path $out -Force | Out-Null
 
-          & $csc /platform:x64 /r:System.Xml.dll `
+          & $csc /platform:x64 `
+            /r:System.Xml.dll `
+            /r:System.ServiceProcess.dll `
+            /r:System.Runtime.WindowsRuntime.dll `
+            /r:"$env:WINDOWS_WINMD" `
             /out:"$out\PhantomFS.exe" src\PhantomFS.cs
 
           if ($LASTEXITCODE -ne 0) {
@@ -73,19 +110,74 @@ jobs:
             Copy-Item $config "bin\x64\PhantomFS.exe.config"
             Write-Host "Staged config: $config"
           } else {
-            Write-Warning "No .exe.config found in workspace — skipping."
+            Write-Warning "No .exe.config found in workspace, skipping."
             Write-Host "Workspace contents:"
             Get-ChildItem "${{ github.workspace }}" | Select-Object Name, Length
           }
 
-      - name: Upload artifact — PhantomFS-${{ github.event.inputs.version }}-x64
+      - name: Upload artifact - PhantomFS-${{ github.event.inputs.version }}-x64
         uses: actions/upload-artifact@v4
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-x64
           path: bin\x64\
           if-no-files-found: error
 
-# ── Release ───────────────────────────────────────────────────────────────
+      - name: Locate or install Inno Setup
+        shell: pwsh
+        run: |
+          # Inno Setup shipped preinstalled on the Windows Server 2022
+          # runner image but was dropped from Windows Server 2025, which
+          # windows-latest now points to. Check for it first (in case a
+          # future image brings it back) rather than always reinstalling.
+          $knownPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+
+          if ($cmd) {
+            $isccPath = $cmd.Source
+          } elseif (Test-Path $knownPath) {
+            $isccPath = $knownPath
+          } else {
+            Write-Host "Inno Setup not found on this runner, installing via Chocolatey..."
+            choco install innosetup -y --no-progress | Out-Null
+            $isccPath = $knownPath
+          }
+
+          if (-not (Test-Path $isccPath)) {
+            Write-Error "ISCC.exe not found after installation attempt."
+            exit 1
+          }
+
+          Write-Host "Using ISCC at: $isccPath"
+          echo "ISCC_PATH=$isccPath" >> $env:GITHUB_ENV
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          # PhantomFS.iss defaults AppVersion to 1.3.0 for a local compile,
+          # but /DAppVersion here overrides that so the installer's version
+          # always matches the version this workflow run was given, rather
+          # than needing the .iss file's default bumped by hand every
+          # release and risking it drifting out of sync.
+          $rawVersion  = "${{ github.event.inputs.version }}"
+          $innoVersion = $rawVersion.TrimStart('v')
+
+          & "$env:ISCC_PATH" "/DAppVersion=$innoVersion" "src\PhantomFS.iss"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup compilation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+          Write-Host "Installer output:"
+          Get-ChildItem "src\Output" | Select-Object Name, Length
+
+      - name: Upload artifact - PhantomFS-${{ github.event.inputs.version }}-Setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-Setup
+          path: src\Output\
+          if-no-files-found: error
+
+# -- Release ---------------------------------------------------------------
   release:
     name: GitHub Release
     needs: build
@@ -98,6 +190,12 @@ jobs:
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-x64
           path: release/x64
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-Setup
+          path: release/setup
 
       - name: Zip release bundle
         run: |
@@ -113,3 +211,4 @@ jobs:
           generate_release_notes: true
           files: |
             release/PhantomFS-${{ github.event.inputs.version }}-x64.zip
+            release/setup/*.exe
