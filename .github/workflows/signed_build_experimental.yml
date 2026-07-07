@@ -1,0 +1,400 @@
+# .github/workflows/build.yml
+# PhantomFS - CI/CD build pipeline
+#
+# Compiles PhantomFS.exe for x64 using the .NET Framework 4.x
+# compiler shipped with Windows, code-signs it, builds and signs the
+# Inno Setup installer, uploads artifacts, and optionally publishes a
+# GitHub Release.
+#
+# -- Code signing --------------------------------------------------------------
+#   Every build is Authenticode-signed. Two modes, chosen automatically:
+#
+#   1. Persistent signer (recommended). Set repository secrets
+#      PHANTOMFS_PFX_BASE64 (a .pfx certificate, base64-encoded) and
+#      PHANTOMFS_PFX_PASSWORD. The same certificate signs every release, so
+#      all versions share one verifiable signer identity.
+#
+#   2. Ephemeral signer (default when the secrets above are not set). The
+#      workflow generates a throwaway self-signed certificate for that run
+#      only and discards it afterwards. Every build then has a DIFFERENT
+#      signer, so there is no continuity between releases.
+#
+#   Either way this is a SELF-SIGNED certificate, not one issued by a
+#   public Certificate Authority. Signing still gives tamper-evidence (the
+#   binary cannot be modified after signing without breaking the
+#   signature) and a verifiable signer identity, but it does NOT clear
+#   Windows SmartScreen or "Unknown Publisher" warnings. Only a CA-issued
+#   code-signing certificate does that.
+#
+# -- Trigger -----------------------------------------------------------------
+#   Manual only - Actions -> Build PhantomFS -> Run workflow
+#   Inputs:
+#     branch          branch to build from (default: main)
+#     version         e.g. v1.3.0, included in artifact and release names
+#     create_release  tick to publish a GitHub Release after building
+# ------------------------------------------------------------------------------
+
+name: Build Signed PhantomFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build from'
+        required: true
+        default: 'main'
+      version:
+        description: 'Version label (e.g. v1.0.0), used in artifact and release names'
+        required: true
+        default: 'v1.0.0'
+      create_release:
+        description: 'Publish a GitHub Release after building'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # required for GitHub Release creation
+
+# -- Build ---------------------------------------------------------------------
+jobs:
+  build:
+    name: Build - x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout ${{ github.event.inputs.branch }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Fetch WinRT metadata (Microsoft.Windows.SDK.Contracts)
+        shell: pwsh
+        run: |
+          # Windows.UI.Notifications.winmd / Windows.Data.Xml.Dom.winmd /
+          # Windows.Foundation.winmd are not reliably present under
+          # C:\Windows\System32\WinMetadata on every Windows runner image,
+          # Server SKUs in particular often lack them, since toast/Action
+          # Center is fundamentally a client-shell feature. Rather than
+          # depend on whatever happens to be installed on the build agent,
+          # pull the single combined Windows.winmd from the
+          # Microsoft.Windows.SDK.Contracts NuGet package instead, it
+          # covers the same API surface as package content, independent of
+          # the host OS. This has no bearing on the target/deployment
+          # machine, which still only needs ProjFS and the OS's own WinRT
+          # runtime at execution time, not this package.
+          $contractsId      = "microsoft.windows.sdk.contracts"
+          $contractsVersion = "10.0.26100.4188"
+          $nupkgUrl     = "https://api.nuget.org/v3-flatcontainer/$contractsId/$contractsVersion/$contractsId.$contractsVersion.nupkg"
+          $nupkgPath    = Join-Path $env:RUNNER_TEMP "sdk.contracts.zip"
+          $extractPath  = Join-Path $env:RUNNER_TEMP "sdk.contracts"
+
+          Invoke-WebRequest -Uri $nupkgUrl -OutFile $nupkgPath
+          Expand-Archive -Path $nupkgPath -DestinationPath $extractPath -Force
+
+          $windowsWinmd = Join-Path $extractPath "ref\netstandard2.0\Windows.winmd"
+          if (-not (Test-Path $windowsWinmd)) {
+            Write-Error "Windows.winmd not found after extracting Microsoft.Windows.SDK.Contracts $contractsVersion"
+            exit 1
+          }
+
+          # Hand the resolved path to later steps.
+          echo "WINDOWS_WINMD=$windowsWinmd" >> $env:GITHUB_ENV
+
+      - name: Compile (x64)
+        shell: pwsh
+        run: |
+          $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          $out = "bin\x64"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+
+          & $csc /platform:x64 `
+            /r:System.Xml.dll `
+            /r:System.ServiceProcess.dll `
+            /r:System.Runtime.WindowsRuntime.dll `
+            /r:"$env:WINDOWS_WINMD" `
+            /out:"$out\PhantomFS.exe" src\PhantomFS.cs
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Compilation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Locate signtool.exe
+        shell: pwsh
+        run: |
+          # signtool ships with the Windows SDK, which windows-latest carries
+          # for Visual Studio's own needs, but its exact folder depends on
+          # the SDK version installed on the image. Check PATH first, then
+          # search the standard Windows Kits layout, newest version first.
+          $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+          if ($cmd) {
+            $signtoolPath = $cmd.Source
+          } else {
+            $signtoolPath = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+                              -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+                            Where-Object { $_.FullName -like "*\x64\*" } |
+                            Sort-Object FullName -Descending |
+                            Select-Object -First 1 -ExpandProperty FullName
+          }
+
+          if (-not $signtoolPath -or -not (Test-Path $signtoolPath)) {
+            Write-Error "signtool.exe not found. The windows-latest runner should carry it as part of the Windows SDK; if that changes, install it explicitly (e.g. choco install windows-sdk-10-version-2004-all)."
+            exit 1
+          }
+
+          Write-Host "Using signtool at: $signtoolPath"
+          echo "PFS_SIGNTOOL=$signtoolPath" >> $env:GITHUB_ENV
+
+      - name: Create or import code-signing certificate
+        shell: pwsh
+        run: |
+          $secretPfxBase64  = "${{ secrets.PHANTOMFS_PFX_BASE64 }}"
+          $secretPfxPassword = "${{ secrets.PHANTOMFS_PFX_PASSWORD }}"
+          $certPath = Join-Path $env:RUNNER_TEMP "phantomfs-sign.pfx"
+
+          if ($secretPfxBase64 -and $secretPfxPassword) {
+            Write-Host "Using the persistent code-signing certificate from repository secrets."
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($secretPfxBase64))
+            $certPassword = $secretPfxPassword
+          } else {
+            Write-Host "::warning::No PHANTOMFS_PFX_BASE64 / PHANTOMFS_PFX_PASSWORD secrets configured."
+            Write-Host "::warning::Generating an EPHEMERAL self-signed certificate for this build only."
+            Write-Host "::warning::Every such build is signed by a DIFFERENT throwaway identity: Windows SmartScreen will still warn, and there is no signer continuity across releases."
+            Write-Host "::warning::For a stable signer identity, create one persistent PFX and store it as the PHANTOMFS_PFX_BASE64 / PHANTOMFS_PFX_PASSWORD repository secrets."
+
+            $subject = "CN=PhantomFS (Unverified Self-Signed Build), O=Alloy Secure"
+            $cert = New-SelfSignedCertificate `
+                      -Type CodeSigningCert `
+                      -Subject $subject `
+                      -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
+                      -KeyUsage DigitalSignature -KeyExportPolicy Exportable `
+                      -NotAfter (Get-Date).AddYears(5) `
+                      -CertStoreLocation Cert:\CurrentUser\My
+
+            $certPassword = [Guid]::NewGuid().ToString("N")
+            $securePassword = ConvertTo-SecureString -String $certPassword -Force -AsPlainText
+            Export-PfxCertificate -Cert $cert -FilePath $certPath -Password $securePassword | Out-Null
+
+            # The exported pfx is all that is needed from here; remove the
+            # ephemeral cert from the runner's certificate store.
+            Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
+          }
+
+          # Mask the password in logs before it is echoed anywhere, including
+          # via GITHUB_ENV in the line below.
+          Write-Host "::add-mask::$certPassword"
+          echo "PFS_CERT_PATH=$certPath" >> $env:GITHUB_ENV
+          echo "PFS_CERT_PW=$certPassword" >> $env:GITHUB_ENV
+
+      - name: Sign PhantomFS.exe
+        shell: pwsh
+        run: |
+          $target = "bin\x64\PhantomFS.exe"
+
+          & $env:PFS_SIGNTOOL sign `
+            /f $env:PFS_CERT_PATH /p $env:PFS_CERT_PW `
+            /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            $target
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "signtool failed to sign $target (exit code $LASTEXITCODE)"
+            exit $LASTEXITCODE
+          }
+
+          $signature = Get-AuthenticodeSignature -FilePath $target
+          if (-not $signature.SignerCertificate) {
+            Write-Error "$target has no signer certificate attached after signing."
+            exit 1
+          }
+
+          Write-Host "Signed $target"
+          Write-Host "  Thumbprint : $($signature.SignerCertificate.Thumbprint)"
+          Write-Host "  Status     : $($signature.Status)"
+          Write-Host "  (self-signed certificates are expected to report a non-trusted status here; this confirms a signature is present and well-formed, not that the signer is trusted by this machine.)"
+
+      - name: Stage config
+        shell: pwsh
+        run: |
+          $config = Get-ChildItem -Path "${{ github.workspace }}\src" `
+                      -Filter "*.exe.config" -File |
+                    Select-Object -First 1 -ExpandProperty FullName
+
+          if ($config) {
+            Copy-Item $config "bin\x64\PhantomFS.exe.config"
+            Write-Host "Staged config: $config"
+          } else {
+            Write-Warning "No .exe.config found in workspace, skipping."
+            Write-Host "Workspace contents:"
+            Get-ChildItem "${{ github.workspace }}" | Select-Object Name, Length
+          }
+
+      - name: Upload artifact - PhantomFS-${{ github.event.inputs.version }}-x64
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-x64
+          path: bin\x64\
+          if-no-files-found: error
+
+      - name: Locate or install Inno Setup
+        shell: pwsh
+        run: |
+          # Inno Setup shipped preinstalled on the Windows Server 2022
+          # runner image but was dropped from Windows Server 2025, which
+          # windows-latest now points to. Check for it first (in case a
+          # future image brings it back) rather than always reinstalling.
+          $knownPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+
+          if ($cmd) {
+            $isccPath = $cmd.Source
+          } elseif (Test-Path $knownPath) {
+            $isccPath = $knownPath
+          } else {
+            Write-Host "Inno Setup not found on this runner, installing via Chocolatey..."
+            choco install innosetup -y --no-progress | Out-Null
+            $isccPath = $knownPath
+          }
+
+          if (-not (Test-Path $isccPath)) {
+            Write-Error "ISCC.exe not found after installation attempt."
+            exit 1
+          }
+
+          Write-Host "Using ISCC at: $isccPath"
+          echo "ISCC_PATH=$isccPath" >> $env:GITHUB_ENV
+
+      - name: Write Inno Setup signing helper
+        shell: pwsh
+        run: |
+          # Inno Setup's SignTool feature runs one fixed external command per
+          # file it needs to sign (the generated Setup.exe, and the embedded
+          # uninstaller when SignedUninstaller=yes), substituting $f with the
+          # quoted path of that file. A small helper script, rather than an
+          # inline signtool command, keeps the cert path and password out of
+          # the command line Inno logs: the helper reads them from the
+          # process environment (PFS_SIGNTOOL / PFS_CERT_PATH / PFS_CERT_PW,
+          # already set by earlier steps via GITHUB_ENV) at the moment it
+          # runs, so the script file itself contains no secret material.
+          $helperPath = Join-Path $env:RUNNER_TEMP "phantomfs-sign-helper.cmd"
+          $helperLines = @(
+            '@echo off',
+            '"%PFS_SIGNTOOL%" sign /f "%PFS_CERT_PATH%" /p %PFS_CERT_PW% /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 %1',
+            'exit /b %ERRORLEVEL%'
+          )
+          Set-Content -Path $helperPath -Value $helperLines -Encoding ASCII
+
+          Write-Host "Wrote signing helper: $helperPath"
+          echo "PFS_SIGN_HELPER=$helperPath" >> $env:GITHUB_ENV
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          # PhantomFS.iss defaults AppVersion to 1.4.0 for a local compile,
+          # but /DAppVersion here overrides that so the installer's version
+          # always matches the version this workflow run was given, rather
+          # than needing the .iss file's default bumped by hand every
+          # release and risking it drifting out of sync.
+          $rawVersion  = "${{ github.event.inputs.version }}"
+          $innoVersion = $rawVersion.TrimStart('v')
+
+          # /DSIGN=1 turns on the [Setup] SignTool block in PhantomFS.iss.
+          # /Sphantomfssign=<command> supplies the command that block refers
+          # to by name: run our helper .cmd through cmd.exe (rather than
+          # invoking it directly, since ISCC will run it via CreateProcess,
+          # which cannot launch a .cmd file without an interpreter), passing
+          # $f through as the file to sign. $q is Inno's own token for a
+          # literal double quote inside this value, used here to quote the
+          # helper path in case RUNNER_TEMP ever contains spaces.
+          $signParam = '/Sphantomfssign=cmd.exe /c $q' + $env:PFS_SIGN_HELPER + '$q $f'
+
+          & "$env:ISCC_PATH" "/DAppVersion=$innoVersion" "/DSIGN=1" $signParam "src\PhantomFS.iss"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup compilation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+          Write-Host "Installer output:"
+          Get-ChildItem "src\Output" | Select-Object Name, Length
+
+      - name: Verify installer signature
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem "src\Output\*.exe" |
+                      Select-Object -First 1 -ExpandProperty FullName
+          if (-not $setupExe) {
+            Write-Error "No installer .exe found in src\Output to verify."
+            exit 1
+          }
+
+          $signature = Get-AuthenticodeSignature -FilePath $setupExe
+          if (-not $signature.SignerCertificate) {
+            Write-Error "$setupExe was not signed. Check the SignTool wiring in PhantomFS.iss and the /S switch passed to ISCC."
+            exit 1
+          }
+
+          Write-Host "Installer signed: $setupExe"
+          Write-Host "  Thumbprint : $($signature.SignerCertificate.Thumbprint)"
+          Write-Host "  Status     : $($signature.Status)"
+
+      - name: Upload artifact - PhantomFS-${{ github.event.inputs.version }}-Setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-Setup
+          path: src\Output\
+          if-no-files-found: error
+
+# -- Release ---------------------------------------------------------------
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.create_release == 'true' }}
+
+    steps:
+      - name: Download x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-x64
+          path: release/x64
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PhantomFS-${{ github.event.inputs.version }}-Setup
+          path: release/setup
+
+      - name: Zip release bundle
+        run: |
+          cd release
+          zip -r PhantomFS-${{ github.event.inputs.version }}-x64.zip x64/
+
+      - name: Create draft release and upload assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: PhantomFS ${{ github.event.inputs.version }}
+          target_commitish: ${{ github.event.inputs.branch }}
+          generate_release_notes: true
+          draft: true
+          files: |
+            release/PhantomFS-${{ github.event.inputs.version }}-x64.zip
+            release/setup/*.exe
+
+      - name: Publish the release
+        shell: bash
+        run: |
+          # On repos with Immutable Releases enabled, GitHub blocks any
+          # update to a release once it has been published, including the
+          # single internal update this action normally performs right
+          # after uploading assets to flip draft -> published. Creating it
+          # as a draft above sidesteps that: drafts are not locked, so
+          # assets upload against a mutable object, and this is the one
+          # and only transition into published state, which GitHub allows
+          # even under Immutable Releases. Any further edits after this
+          # point would hit the same block the old single-step flow did.
+          gh release edit "${{ github.event.inputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
