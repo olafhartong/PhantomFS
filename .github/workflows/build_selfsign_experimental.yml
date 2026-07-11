@@ -15,7 +15,7 @@
 #     create_release  tick to publish a GitHub Release after building
 # ------------------------------------------------------------------------------
 
-name: Build PhantomFS SelfSign Experimental
+name: Build PhantomFS selfsign Experimental
 
 on:
   workflow_dispatch:
@@ -161,6 +161,17 @@ jobs:
           echo "CODESIGN_CER_PATH=$cerPath" >> $env:GITHUB_ENV
 
           Write-Host "Generated certificate 'Code Sign Sample' (thumbprint $thumbprint)"
+
+      - name: Trust Code Sign Sample root certificate
+        shell: pwsh
+        run: |
+          # signtool verify checks the chain against the machine trust
+          # store. A self-signed root is not trusted by default, so
+          # without this step verification fails even though signing
+          # itself succeeds. Importing here covers both the exe and the
+          # installer signing/verify steps later in this job.
+          Import-Certificate -FilePath "$env:CODESIGN_CER_PATH" -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
+          Write-Host "Imported Code Sign Sample root into LocalMachine\Root"
 
       - name: Sign binaries with Code Sign Sample certificate
         shell: pwsh
