@@ -73,6 +73,10 @@ Because legitimate users have no reason to open files they didn't put there, eve
 
 All settings live in `PhantomFS.exe.config`. **All keys are optional** — omitting a key uses the default shown in the table.
 
+Use the **PhantomFS Profile Builder** to generate different config profiles for your deployment scenarios:
+
+- https://alloysecuregroup.github.io/PhantomFS/
+
 ### `<settings>` Section
 
 ```xml

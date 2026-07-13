@@ -45,7 +45,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.event.inputs.branch }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.branch }}
 
@@ -197,14 +197,14 @@ jobs:
           & $signtool verify /pa "bin\x64\PhantomFS.exe"
 
       - name: Upload artifact - PhantomFS-${{ github.event.inputs.version }}-x64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-x64
           path: bin\x64\
           if-no-files-found: error
 
       - name: Upload artifact - Code Sign Sample trusted root
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-CodeSignSample-cer
           path: ${{ env.CODESIGN_CER_PATH }}
@@ -285,7 +285,7 @@ jobs:
           & $signtool verify /pa "$installer"
 
       - name: Upload artifact - PhantomFS-${{ github.event.inputs.version }}-Setup
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-Setup
           path: src\Output\
@@ -300,19 +300,19 @@ jobs:
 
     steps:
       - name: Download x64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-x64
           path: release/x64
 
       - name: Download installer artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-Setup
           path: release/setup
 
       - name: Download Code Sign Sample trusted root
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: PhantomFS-${{ github.event.inputs.version }}-CodeSignSample-cer
           path: release/cert
