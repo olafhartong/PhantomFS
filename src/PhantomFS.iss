@@ -102,7 +102,7 @@ Name: "{group}\Documentation";               Filename: "{app}\docs\index.md"
 ; per [Run]/[UninstallRun] entry, it does not support continuing a single
 ; entry's Filename/Parameters/Description/Flags across multiple lines the
 ; way earlier revisions of this script assumed.
-Filename: "powershell.exe"; Parameters: "-NonInteractive -NoProfile -WindowStyle Hidden -Command ""$f=(Get-WindowsOptionalFeature -Online -FeatureName Client-ProjFS); if($f.State -ne 'Enabled') {{ Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart }}"""; Description: "Enabling Windows ProjFS optional feature"; StatusMsg: "Enabling Windows Projected File System..."; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NonInteractive -NoProfile -WindowStyle Hidden -Command ""$ErrorActionPreference='Stop'; $f=Get-WindowsOptionalFeature -Online -FeatureName Client-ProjFS; if($f.State -ne 'Enabled') {{ Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart | Out-Null }}"""; Description: "Enabling Windows ProjFS optional feature"; StatusMsg: "Enabling Windows Projected File System..."; Flags: runhidden waituntilterminated
 
 ; -- Register EventLog source ---------------------------------------------
 Filename: "powershell.exe"; Parameters: "-NonInteractive -NoProfile -WindowStyle Hidden -Command ""if(-not [System.Diagnostics.EventLog]::SourceExists('PhantomFS')) {{ [System.Diagnostics.EventLog]::CreateEventSource('PhantomFS','Application') }}"""; Description: "Registering Windows Event Log source"; StatusMsg: "Registering Event Log source..."; Flags: runhidden waituntilterminated
@@ -121,7 +121,7 @@ Filename: "powershell.exe"; Parameters: "-NonInteractive -NoProfile -WindowStyle
 ; into [Code] through the {code:...} constant.
 ; No --service here, this launches interactively in the installing user's
 ; own session, where a console/desktop exists.
-Filename: "{app}\{#AppExeName}"; Parameters: "--syntheticonly --virtroot ""{code:GetVirtRootParam}"""; Description: "Launch PhantomFS now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Parameters: "--syntheticonly --virtroot ""{code:GetVirtRootParam}"""; Description: "Launch PhantomFS now"; Flags: nowait postinstall skipifsilent unchecked
 
 [UninstallRun]
 ; Stop any running PhantomFS instances gracefully before uninstall.
@@ -246,7 +246,7 @@ end;
 //      around the virtroot path, which schtasks does not parse reliably; the
 //      trailing \" before the closing quote escaped the quote and corrupted
 //      the path. A Command/Arguments split in XML removes all nested quoting.
-//   2. Working directory. A SYSTEM task with no working directory defaults to
+//   2. Working directory. A scheduled task with no working directory defaults to
 //      C:\Windows\System32, so any relative path resolves there.
 //      WorkingDirectory pins it to the install folder.
 //   3. Restart on failure. At logon the ProjFS filter or the target volume may
@@ -256,13 +256,14 @@ end;
 //   4. --service. The provider is launched with --service so it runs
 //      non-interactively (blocks until stopped) instead of reading a stdin
 //      that does not exist under a SYSTEM task and exiting immediately.
-function BuildTaskXml(const ExePath, WorkDir, VirtRoot: String): String;
+function BuildTaskXml(const ExePath, WorkDir, VirtRoot, TaskUserId: String): String;
 var
-  Args: String;
+  PsArgs: String;
 begin
-  // Arguments are XML text, not a shell string, so no surrounding quotes are
-  // needed except the inner quotes for a path that may contain spaces.
-  Args := '--service --syntheticonly --virtroot "' + VirtRoot + '"';
+  // Run via PowerShell with hidden window style so the scheduled task does
+  // not open a visible console window in the user's session.
+  PsArgs := '-NonInteractive -NoProfile -WindowStyle Hidden -Command "& '''
+    + ExePath + ''' --service --syntheticonly --virtroot ''' + VirtRoot + '''"';
 
   Result :=
     '<?xml version="1.0" encoding="UTF-16"?>' + #13#10 +
@@ -280,7 +281,8 @@ begin
     '  </Triggers>' + #13#10 +
     '  <Principals>' + #13#10 +
     '    <Principal id="Author">' + #13#10 +
-    '      <UserId>S-1-5-18</UserId>' + #13#10 +        // SYSTEM
+    '      <UserId>' + XmlEscape(TaskUserId) + '</UserId>' + #13#10 +
+    '      <LogonType>InteractiveToken</LogonType>' + #13#10 +
     '      <RunLevel>HighestAvailable</RunLevel>' + #13#10 +
     '    </Principal>' + #13#10 +
     '  </Principals>' + #13#10 +
@@ -301,8 +303,8 @@ begin
     '  </Settings>' + #13#10 +
     '  <Actions Context="Author">' + #13#10 +
     '    <Exec>' + #13#10 +
-    '      <Command>' + XmlEscape(ExePath) + '</Command>' + #13#10 +
-    '      <Arguments>' + XmlEscape(Args) + '</Arguments>' + #13#10 +
+    '      <Command>powershell.exe</Command>' + #13#10 +
+    '      <Arguments>' + XmlEscape(PsArgs) + '</Arguments>' + #13#10 +
     '      <WorkingDirectory>' + XmlEscape(WorkDir) + '</WorkingDirectory>' + #13#10 +
     '    </Exec>' + #13#10 +
     '  </Actions>' + #13#10 +
@@ -323,12 +325,14 @@ var
   XmlPath: String;
   TaskXml: String;
   VirtRoot: String;
+  TaskUserId: String;
 begin
   if CurStep = ssPostInstall then
   begin
     VirtRoot := GetVirtRoot();
     ExePath  := ExpandConstant('{app}\PhantomFS.exe');
     WorkDir  := ExpandConstant('{app}');
+    TaskUserId := ExpandConstant('{username}');
 
     // 1. Create the virtual root directory. Must happen here (before the
     // Finished page) so it exists by the time the postinstall launch entry
@@ -338,7 +342,7 @@ begin
     // 2. Startup scheduled task, if the user ticked it.
     if IsTaskSelected('startuptask') then
     begin
-      TaskXml := BuildTaskXml(ExePath, WorkDir, VirtRoot);
+      TaskXml := BuildTaskXml(ExePath, WorkDir, VirtRoot, TaskUserId);
 
       // Task Scheduler expects the imported XML as UTF-16. Inno Setup 6 is
       // Unicode-only, so SaveStringToFile writes UTF-16LE with a BOM, which
