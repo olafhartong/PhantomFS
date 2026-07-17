@@ -1,0 +1,509 @@
+# synthetic-data.yml
+# Equivalent of the <syntheticFileList> and <syntheticTemplates> blocks in
+# PhantomFS.exe.config, expressed as YAML.
+#
+# Load with:
+#   PhantomFS.exe --virtroot C:\Honeypot --syntheticonly --syntheticyaml C:\Honeypot\synthetic-data.yml
+# or embed the path once in PhantomFS.exe.config:
+#   <settings><syntheticYamlPath>C:\Honeypot\synthetic-data.yml</syntheticYamlPath></settings>
+#
+# When --syntheticyaml (or <syntheticYamlPath>) is set, this file replaces
+# <syntheticFileList> AND <syntheticTemplates> together. PhantomFS.exe.config
+# is still used for everything under <settings> (alerts, cleanup, verbose, etc).
+#
+# Schema
+#   files:
+#     - path:      Virtual path, "/" or "\" both accepted as the separator.
+#       directory: true | false            (default: false)
+#       size:      bytes                   (default: 0; ignored for directories)
+#       timestamp: unix seconds, applied to all four NTFS timestamps (default: 0)
+#
+#   templates:
+
+#     - name:      OR   extension:         (exactly one of the two)
+#       type:      "pem" for a generated PEM block, "base64" for a plain
+#                  base64-encoded binary, "base64gzip" for base64 of a
+#                  gzip stream, or omit for plain text (default)
+#       pemLabel:  label inside BEGIN/END markers (pem only, default "PRIVATE KEY")
+#       content:   |                        literal block:
+#                    - plain text for the default type
+#                    - base64 text for type: base64 / base64gzip (embedded
+#                      newlines are fine - they're ignored during decoding)
+#                    - not required for type: pem
+#
+# "base64" / "base64gzip" let you embed a real binary file (an actual small
+# PDF, image, xlsx/docx, etc.) instead of synthesized text. Decoding happens
+# lazily on first read and is cached after that, so adding many embedded
+# binaries does not slow down startup. IMPORTANT: the matching "files:"
+# entry's "size:" must equal the exact decoded (post-gzip) byte length, or
+# the content will be truncated/padded to fit and most binary formats will
+# fail to open. A mismatch logs a one-time [WARN] on first read.
+#         ... file content, padded/truncated to the entry's declared size ...
+#
+# Indentation must use spaces (no tabs). Lines starting with # and blank lines
+# are ignored outside of "content: |" blocks, where every line is kept as-is.
+
+files:
+  # -- AWS Credentials --------------------------------------------------------
+  - path: AWS
+    directory: true
+    size: 0
+    timestamp: 1743942586
+  - path: AWS/credentials
+    directory: false
+    size: 116
+    timestamp: 1741508986
+  - path: AWS/config
+    directory: false
+    size: 94
+    timestamp: 1739636986
+  - path: AWS/iam_access_keys.csv
+    directory: false
+    size: 198
+    timestamp: 1744586986
+  - path: AWS/s3_bucket_policy.json
+    directory: false
+    size: 1243
+    timestamp: 1736177386
+
+  # -- SSH Keys ---------------------------------------------------------------
+  - path: SSH Keys
+    directory: true
+    size: 0
+    timestamp: 1751527786
+  - path: SSH Keys/id_rsa
+    directory: false
+    size: 1675
+    timestamp: 1738927786
+  - path: SSH Keys/id_rsa.pub
+    directory: false
+    size: 381
+    timestamp: 1738927786
+  - path: SSH Keys/id_ed25519
+    directory: false
+    size: 411
+    timestamp: 1740680986
+  - path: SSH Keys/id_ed25519.pub
+    directory: false
+    size: 107
+    timestamp: 1740680986
+  - path: SSH Keys/authorized_keys
+    directory: false
+    size: 762
+    timestamp: 1736926186
+  - path: SSH Keys/deploy_key.pem
+    directory: false
+    size: 1704
+    timestamp: 1742354986
+
+  # -- API Keys ---------------------------------------------------------------
+  - path: API Keys
+    directory: true
+    size: 0
+    timestamp: 1744586986
+  - path: API Keys/api_keys.json
+    directory: false
+    size: 847
+    timestamp: 1748708986
+  - path: API Keys/github_pat.txt
+    directory: false
+    size: 93
+    timestamp: 1745674186
+  - path: API Keys/stripe_keys.txt
+    directory: false
+    size: 312
+    timestamp: 1749252586
+
+  # -- Confidential Documents (PDF, Excel, Word) ------------------------------
+  - path: Documents
+    directory: true
+    size: 0
+    timestamp: 1744586986
+  - path: Documents/Q4_Financial_Report_2024.pdf
+    directory: false
+    size: 8192
+    timestamp: 1744586986
+  - path: Documents/Employee_Salaries_2024.xlsx
+    directory: false
+    size: 4096
+    timestamp: 1743942586
+  - path: Documents/Board_Meeting_Notes_Confidential.docx
+    directory: false
+    size: 6144
+    timestamp: 1741508986
+  - path: Documents/Acquisition_NDA_Draft.docx
+    directory: false
+    size: 5120
+    timestamp: 1740680986
+  - path: Documents/IP_Valuation_Report_2024.pdf
+    directory: false
+    size: 12288
+    timestamp: 1739636986
+  - path: Documents/Executive_Compensation_2024.xlsx
+    directory: false
+    size: 3840
+    timestamp: 1742354986
+  - path: Documents/Merger_Term_Sheet.pdf
+    directory: false
+    size: 9216
+    timestamp: 1745674186
+  - path: Documents/honeybadger.png
+    directory: false
+    size: 1642
+    timestamp: 1750000000
+
+templates:
+  # -- Real binary example: a small original PNG, gzip-compressed, for
+  # exercising the base64gzip decode path end to end. --
+  - name: honeybadger.png
+    type: base64gzip
+    content: |
+      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
+      QwDMwWD/Fr+oi/8AmMictWoGAAA=
+
+  # -- AWS --
+  - name: credentials
+    content: |
+      [default]
+      aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+      aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+  - name: config
+    content: |
+      [default]
+      region = us-east-1
+      output = json
+
+      [profile staging]
+      region = us-west-2
+      output = text
+
+      [profile prod]
+      region = eu-west-1
+      output = json
+
+  - name: iam_access_keys.csv
+    content: |
+      User Name,Access key ID,Secret access key,Status,Created
+      admin,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY,Active,2024-01-15
+      deploy,AKIAI44QH8DHBEXAMPLE,je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY,Active,2024-03-01
+
+  - name: s3_bucket_policy.json
+    content: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowRootAndAdminAccess",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": [
+                "arn:aws:iam::123456789012:root",
+                "arn:aws:iam::123456789012:user/admin"
+              ]
+            },
+            "Action": "s3:*",
+            "Resource": [
+              "arn:aws:s3:::example-company-backups",
+              "arn:aws:s3:::example-company-backups/*"
+            ]
+          },
+          {
+            "Sid": "DenyUnencryptedObjectUploads",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::example-company-backups/*",
+            "Condition": {
+              "StringNotEquals": {
+                "s3:x-amz-server-side-encryption": "AES256"
+              }
+            }
+          },
+          {
+            "Sid": "AllowCrossAccountRead",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::987654321098:role/ReadOnlyRole"
+            },
+            "Action": ["s3:GetObject", "s3:ListBucket"],
+            "Resource": [
+              "arn:aws:s3:::example-company-backups",
+              "arn:aws:s3:::example-company-backups/*"
+            ]
+          }
+        ]
+      }
+
+  # -- SSH Keys. Private keys use PEM blocks. --
+  - name: id_rsa
+    type: pem
+    pemLabel: RSA PRIVATE KEY
+
+  - name: id_ed25519
+    type: pem
+    pemLabel: OPENSSH PRIVATE KEY
+
+  - name: deploy_key.pem
+    type: pem
+    pemLabel: RSA PRIVATE KEY
+
+  - name: id_rsa.pub
+    content: |
+      ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7e1bXAklV8kGvFLkv0NCHnfRakXS3w2fBWHCp
+      WJCjVp6eLI3YJFTvX9z5JIFAYTmXW6r7M0cHZNrKs8DCFx9mTCH6bQp1YJUvC3m8Xz4vNFn5T
+      7b9HhXFCp3w1JKEjgQkTb5LMD2Jf9Rn8bVz7e4wHpBh7kMNqKREz admin@prod-server
+
+  - name: id_ed25519.pub
+    content: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpTX9kMqzR7vE4pLhNbDgCm2wH3FjKsP0uYxRnVt8Qo user@example-host
+
+  - name: authorized_keys
+    content: |
+      ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7e1bXAklV8kGvFLkv0NCHnfRakXS3w2fBWHCp admin@prod-server
+      ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDm3pK7LrXnV5tBs8WqNzJ9PeYc4FhOkM2iVgRd deploy@ci-runner
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpTX9kMqzR7vE4pLhNbDgCm2wH3FjKsP0uYxRnVt8Qo backup@monitoring
+
+  # -- API Keys --
+  - name: api_keys.json
+    content: |
+      {
+        "version": "1.0",
+        "environment": "production",
+        "created": "2024-01-15",
+        "keys": {
+          "openai": {
+            "api_key": "sk-EXAMPLE1234567890abcdefghijklmnopqrstuvwxyz1234",
+            "organization": "org-EXAMPLE1234567890abcdefghij",
+            "model": "gpt-4-turbo"
+          },
+          "sendgrid": {
+            "api_key": "SG.EXAMPLE1234567890abcdefghijklmnopqrstuvwxyz",
+            "from_email": "noreply@example.com"
+          },
+          "twilio": {
+            "account_sid": "ACEXAMPLE1234567890abcdefghijklmnop",
+            "auth_token": "EXAMPLE1234567890abcdefghijklmnopqr",
+            "from_number": "+15005550006"
+          },
+          "pagerduty": {
+            "api_key": "EXAMPLE1234567890abcdefghijklmnopqr",
+            "service_key": "EXAMPLE1234567890abcdefghijklmnopqr"
+          }
+        }
+      }
+
+  - name: github_pat.txt
+    content: |
+      ghp_EXAMPLE1234567890abcdefghijklmnopqrstuvwxyz12
+
+      Created: 2024-01-15
+      Scopes: repo, workflow, read:org
+
+  - name: stripe_keys.txt
+    content: |
+      # Stripe API Keys - Production
+      # Rotated: 2024-01-15
+
+      Publishable Key:
+      pk_live_EXAMPLE1234567890abcdefghijklmnopqrstuvwxyz
+
+      Secret Key:
+      sk_live_EXAMPLE1234567890abcdefghijklmnopqrstuvwxyz
+
+      Restricted Key (webhooks):
+      rk_live_EXAMPLE1234567890abcdefghijklmnopqrstuvwx
+
+      Webhook Signing Secret:
+      whsec_EXAMPLE1234567890abcdefghijklmnopqrstuvwxyz
+
+  # -- PDF: minimal valid PDF-1.4 structure. Served for any .pdf not matched by name above. --
+  - extension: .pdf
+    content: |
+      %PDF-1.4
+      1 0 obj
+      <</Type /Catalog /Pages 2 0 R>>
+      endobj
+      2 0 obj
+      <</Type /Pages /Kids [3 0 R] /Count 1>>
+      endobj
+      3 0 obj
+      <</Type /Page /MediaBox [0 0 612 792] /Parent 2 0 R
+      /Resources <</Font <</F1 <</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>>>>>
+      /Contents 4 0 R>>
+      endobj
+      4 0 obj
+      <</Length 192>>
+      stream
+      BT
+      /F1 22 Tf
+      72 700 Td
+      (CONFIDENTIAL) Tj
+      0 -36 Td
+      /F1 11 Tf
+      (This document contains sensitive information.) Tj
+      0 -20 Td
+      (Access is monitored and logged.) Tj
+      0 -20 Td
+      (Authorised personnel only.) Tj
+      ET
+      endstream
+      endobj
+      xref
+      0 5
+      0000000000 65535 f
+      0000000009 00000 n
+      0000000058 00000 n
+      0000000115 00000 n
+      0000000296 00000 n
+      trailer
+      <</Size 5 /Root 1 0 R>>
+      startxref
+      542
+      %%EOF
+
+  # -- Excel (.xlsx): HTML table that Excel opens as a spreadsheet. --
+  - extension: .xlsx
+    content: |
+      <html xmlns:o="urn:schemas-microsoft-com:office:office"
+            xmlns:x="urn:schemas-microsoft-com:office:excel"
+            xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+      <!--[if gte mso 9]>
+      <xml><x:ExcelWorkbook><x:ExcelWorksheets>
+      <x:ExcelWorksheet><x:Name>Sheet1</x:Name>
+      <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+      </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>
+      <![endif]-->
+      <style>
+        body  { font-family: Calibri, sans-serif; font-size: 11pt; }
+        th    { background: #1F3864; color: #FFFFFF; padding: 6px 12px; text-align: left; }
+        td    { padding: 5px 12px; border-bottom: 1px solid #D9D9D9; }
+        tr:nth-child(even) td { background: #EEF2F7; }
+      </style>
+      </head>
+      <body>
+      <h2 style="color:#C00000">CONFIDENTIAL - AUTHORIZED ACCESS ONLY</h2>
+      <p>Classification: Restricted &nbsp;|&nbsp; Distribution: HR &amp; Executive Leadership</p>
+      <table border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <th>Employee Name</th><th>Title</th><th>Department</th>
+        <th>Annual Base</th><th>Bonus %</th><th>Total Comp</th>
+      </tr>
+      <tr><td>Smith, Jonathan A.</td><td>Chief Executive Officer</td><td>Executive</td><td>$720,000</td><td>45%</td><td>$1,044,000</td></tr>
+      <tr><td>Patel, Priya R.</td><td>Chief Financial Officer</td><td>Finance</td><td>$540,000</td><td>35%</td><td>$729,000</td></tr>
+      <tr><td>Nguyen, David T.</td><td>VP Engineering</td><td>Engineering</td><td>$380,000</td><td>25%</td><td>$475,000</td></tr>
+      <tr><td>Williams, Sarah E.</td><td>Sr. Staff Engineer</td><td>Engineering</td><td>$295,000</td><td>20%</td><td>$354,000</td></tr>
+      <tr><td>Chen, Marcus L.</td><td>Director of Product</td><td>Product</td><td>$265,000</td><td>20%</td><td>$318,000</td></tr>
+      <tr><td>Rodriguez, Ana M.</td><td>Sr. Software Engineer</td><td>Engineering</td><td>$210,000</td><td>15%</td><td>$241,500</td></tr>
+      </table>
+      <p style="font-size:8pt;color:#999">Prepared by HR - Fiscal Year 2024 - Do not distribute</p>
+      </body>
+      </html>
+
+  # -- Word (.docx): HTML document that Word opens. --
+  - extension: .docx
+    content: |
+      <!DOCTYPE html>
+      <html xmlns:o="urn:schemas-microsoft-com:office:office"
+            xmlns:w="urn:schemas-microsoft-com:office:word"
+            xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+      <title>CONFIDENTIAL</title>
+      <!--[if gte mso 9]>
+      <xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml>
+      <![endif]-->
+      <style>
+        @page { margin: 2.5cm; }
+        body  { font-family: Calibri, sans-serif; font-size: 11pt; line-height: 1.5; }
+        h1    { font-size: 16pt; color: #C00000; border-bottom: 2px solid #C00000; padding-bottom: 6pt; }
+        h2    { font-size: 13pt; color: #1F3864; margin-top: 18pt; }
+        .meta { color: #555; font-size: 9pt; margin-bottom: 18pt; }
+        .watermark { color: #C00000; font-size: 9pt; font-weight: bold; letter-spacing: 2px; }
+      </style>
+      </head>
+      <body>
+      <p class="watermark">&#x25CF; CONFIDENTIAL &#x25CF; ATTORNEY-CLIENT PRIVILEGED &#x25CF; DO NOT DISTRIBUTE &#x25CF;</p>
+      <h1>CONFIDENTIAL</h1>
+      <p class="meta">
+        <strong>Classification:</strong> Restricted &nbsp;&nbsp;
+        <strong>Date:</strong> January 15, 2024 &nbsp;&nbsp;
+        <strong>Document ID:</strong> CORP-CONF-2024-0042
+      </p>
+
+      <h2>1. Executive Summary</h2>
+      <p>This document contains proprietary information for authorised personnel only.
+      Unauthorised access, reproduction, or distribution is strictly prohibited and
+      may constitute a violation of company policy and applicable law.</p>
+
+      <h2>2. Background</h2>
+      <p>The Board of Directors has authorised management to proceed with due diligence
+      activities related to a potential strategic transaction. All information contained
+      herein is subject to a binding Non-Disclosure Agreement dated December 1, 2023.</p>
+
+      <h2>3. Terms and Conditions</h2>
+      <p>By accessing this document you confirm that you are an authorised recipient.
+      Access to this document is monitored. Any unauthorised disclosure must be
+      reported immediately to the Legal and Compliance team.</p>
+
+      <p style="font-size:8pt;color:#999;margin-top:36pt">
+        PhantomFS Synthetic Document - Access Logged
+      </p>
+      </body>
+      </html>
+
+  # -- Extension fallbacks --
+  - extension: .pem
+    type: pem
+    pemLabel: PRIVATE KEY
+
+  - extension: .json
+    content: |
+      {
+        "synthetic": true,
+        "generator": "PhantomFS",
+        "note": "This is a honeypot file. Access has been logged."
+      }
+
+  - extension: .csv
+    content: |
+      id,name,email,department,access_level
+      1,admin,admin@example.com,IT,superadmin
+      2,deploy,deploy@example.com,Engineering,admin
+      3,backup,backup@example.com,Operations,read-only
+
+  - extension: .txt
+    content: |
+      CONFIDENTIAL
+      This file contains sensitive information.
+      Access is monitored and logged.
+      Authorised personnel only.
